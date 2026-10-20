@@ -18,26 +18,37 @@ import 'core/storage/database.dart';
 import 'data/builtin_rules.dart';
 import 'data/repository/source_repository.dart';
 
+/// 启动阶段状态：先出一帧，再逐步初始化，避免插件阻塞时一直停在系统闪屏。
+final ValueNotifier<String> _bootStatus = ValueNotifier<String>('正在启动');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
-
+  runApp(const _BootApp());
   _installErrorHooks();
 
-  await PlayerPreferences.load();
-  await LocalePreferences.load();
-  await ThemeModeNotifier.load();
+  await _step('加载设置', () async {
+    await PlayerPreferences.load().timeout(const Duration(seconds: 4));
+    await LocalePreferences.load().timeout(const Duration(seconds: 4));
+    await ThemeModeNotifier.load().timeout(const Duration(seconds: 4));
+  });
 
-  final Directory dir = await getApplicationSupportDirectory();
-  final String dbPath = p.join(dir.path, 'sanwenyu.db');
-  final AppDatabase db = AppDatabase.open(dbPath);
-
-  // 首次启动导入内置规则，失败不阻塞启动。
+  _bootStatus.value = '打开数据库';
+  Directory dir;
   try {
-    await BuiltinRules.seedIfEmpty(SourceRepository(db, HttpClient()));
-  } on Object catch (e, stack) {
-    appLogger.e('内置规则导入失败', error: e, stackTrace: stack);
+    dir = await getApplicationSupportDirectory().timeout(const Duration(seconds: 4));
+  } on Object catch (e) {
+    appLogger.w('应用目录不可用，改用缓存目录: $e');
+    dir = Directory.systemTemp;
   }
+  final AppDatabase db = AppDatabase.open(p.join(dir.path, 'sanwenyu.db'));
+
+  await _step('导入内置规则', () async {
+    await BuiltinRules.seedIfEmpty(SourceRepository(db, HttpClient()))
+        .timeout(const Duration(seconds: 6));
+  });
+
+  _bootStatus.value = '初始化播放器';
+  MediaKit.ensureInitialized();
 
   runApp(
     ProviderScope(
@@ -45,6 +56,15 @@ Future<void> main() async {
       child: const SanwenyuApp(),
     ),
   );
+}
+
+Future<void> _step(String label, Future<void> Function() action) async {
+  _bootStatus.value = label;
+  try {
+    await action();
+  } on Object catch (e, stack) {
+    appLogger.e('启动步骤失败: $label', error: e, stackTrace: stack);
+  }
 }
 
 /// 未捕获异常进日志缓冲，用户可以在「我的 → 运行日志」里直接复制出来。
@@ -72,6 +92,38 @@ void _installErrorHooks() {
   }
 }
 
+class _BootApp extends StatelessWidget {
+  const _BootApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: ValueListenableBuilder<String>(
+            valueListenable: _bootStatus,
+            builder: (BuildContext context, String value, Widget? child) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const SizedBox(
+                    width: 42,
+                    height: 42,
+                    child: CircularProgressIndicator(strokeWidth: 3),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(value, style: const TextStyle(fontSize: 15)),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 测试与桌面调试用：使用内存数据库启动。
 Future<void> mainInMemory() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -91,4 +143,3 @@ String defaultDatabaseName() => 'sanwenyu.db';
 
 /// 避免 tree-shake。
 bool get isDesktop => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-
