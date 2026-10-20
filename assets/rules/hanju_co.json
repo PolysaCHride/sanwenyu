@@ -1,0 +1,37 @@
+{
+  "id": "hanju-co",
+  "name": "韩剧.co",
+  "baseUrl": "https://hanju.co",
+  "headers": { "Referer": "https://hanju.co/" },
+  "search": {
+    "url": "/index.php/vod/search.html?wd={keyword}",
+    "method": "GET",
+    "list": ".myui-vodlist__box",
+    "fields": {
+      "title": { "sel": "h4.title a", "attr": "text" },
+      "url": { "sel": "a.myui-vodlist__thumb", "attr": "href" },
+      "cover": { "sel": "a.myui-vodlist__thumb", "attr": "style", "regex": "url\\(([^)]+)\\)", "group": 1 },
+      "remark": { "sel": ".pic-text", "attr": "text" }
+    }
+  },
+  "detail": {
+    "title": { "sel": "h1.title", "attr": "text" },
+    "cover": { "sel": ".myui-content__thumb img", "attr": "data-original" },
+    "synopsis": { "sel": ".myui-content__desc", "attr": "text" },
+    "episodes": {
+      "list": ".myui-content__list li a",
+      "fields": {
+        "title": { "sel": "", "attr": "text" },
+        "url": { "sel": "", "attr": "href" }
+      }
+    }
+  },
+  "play": {
+    "mode": "page",
+    "extract": [
+      "\"url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
+      "https?://[^\"'\\s<>]+\\.m3u8[^\"'\\s<>]*"
+    ],
+    "referer": "{detailUrl}"
+  }
+}

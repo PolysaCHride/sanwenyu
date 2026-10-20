@@ -1,0 +1,13 @@
+* text=auto
+*.dart text
+*.yaml text
+*.json text
+*.md text
+*.png binary
+*.jpg binary
+*.ico binary
+*.jks binary
+*.keystore binary
+*.zip binary
+*.exe binary
+*.apk binary

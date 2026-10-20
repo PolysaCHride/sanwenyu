@@ -1,0 +1,36 @@
+{
+  "id": "ikanbot",
+  "name": "爱看机器人",
+  "baseUrl": "https://www.ikanbot.com",
+  "headers": { "Referer": "https://www.ikanbot.com/" },
+  "search": {
+    "url": "/search?q={keyword}",
+    "method": "GET",
+    "list": ".m-list .m-item",
+    "fields": {
+      "title": { "sel": "a.b-img", "attr": "title" },
+      "url": { "sel": "a.b-img", "attr": "href" },
+      "cover": { "sel": "a.b-img img", "attr": "data-original" },
+      "remark": { "sel": ".m-info .m-score", "attr": "text" }
+    }
+  },
+  "detail": {
+    "title": { "sel": "h2", "attr": "text" },
+    "cover": { "sel": ".m-pic img", "attr": "src" },
+    "synopsis": { "sel": ".m-desc", "attr": "text" },
+    "episodes": {
+      "list": ".m-playlist a",
+      "fields": {
+        "title": { "sel": "", "attr": "text" },
+        "url": { "sel": "", "attr": "href" }
+      }
+    }
+  },
+  "play": {
+    "mode": "page",
+    "extract": [
+      "\"url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
+      "https?://[^\"'\\s<>]+\\.m3u8[^\"'\\s<>]*"
+    ]
+  }
+}

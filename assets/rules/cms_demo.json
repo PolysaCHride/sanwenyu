@@ -1,0 +1,36 @@
+{
+  "id": "template-maccms",
+  "name": "苹果CMS 模板站",
+  "baseUrl": "https://example.com",
+  "headers": { "Referer": "https://example.com/" },
+  "search": {
+    "url": "/index.php/vod/search.html?wd={keyword}",
+    "method": "GET",
+    "list": ".myui-vodlist li, .myui-vodlist__box",
+    "fields": {
+      "title": { "sel": "h4 a, .title a", "attr": "text" },
+      "url": { "sel": "a", "attr": "href" },
+      "cover": { "sel": "a", "attr": "data-original" },
+      "remark": { "sel": ".pic-text", "attr": "text" }
+    }
+  },
+  "detail": {
+    "title": { "sel": "h1", "attr": "text" },
+    "cover": { "sel": ".myui-content__thumb img, .pic img", "attr": "data-original" },
+    "synopsis": { "sel": ".myui-content__desc, .desc", "attr": "text" },
+    "episodes": {
+      "list": ".myui-content__list li a, .play-list a",
+      "fields": {
+        "title": { "sel": "", "attr": "text" },
+        "url": { "sel": "", "attr": "href" }
+      }
+    }
+  },
+  "play": {
+    "mode": "page",
+    "extract": [
+      "\"url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
+      "https?://[^\"'\\s<>]+\\.m3u8[^\"'\\s<>]*"
+    ]
+  }
+}
