@@ -28,6 +28,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   bool _searching = false;
   bool _classifying = false;
   bool _koreanOnly = false;
+  bool _hadHits = false;
   String _keyword = '';
   List<AggregatedResult> _results = const <AggregatedResult>[];
   List<SourceSearchState> _states = const <SourceSearchState>[];
@@ -55,6 +56,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _keyword = kw;
       _results = const <AggregatedResult>[];
       _states = const <SourceSearchState>[];
+      _hadHits = false;
       _error = null;
     });
     try {
@@ -74,6 +76,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           .searchAll(kw, adapters);
       if (!mounted) return;
       List<AggregatedResult> results = response.results;
+      final bool hadHits = results.any(
+        (AggregatedResult r) => r.hits.isNotEmpty,
+      );
 
       if (_koreanOnly && results.isNotEmpty) {
         final TmdbSettings settings = await TmdbSettings.load();
@@ -116,6 +121,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   ),
             ];
           } else {
+            _koreanOnly = false;
             _snack(L10n.of(context).tmdbClassifyFailed);
           }
         }
@@ -125,6 +131,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       setState(() {
         _searching = false;
         _classifying = false;
+        _hadHits = hadHits;
         _results = results;
         _states = response.states;
       });
@@ -298,7 +305,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           description: l.searchEmptyDesc,
         );
       }
-      if (_koreanOnly) {
+      if (_koreanOnly && _hadHits) {
         return EmptyView(
           icon: Icons.search_off,
           title: l.tmdbNoKorean,

@@ -31,6 +31,11 @@ dependencies:
   collection: ^1.19.1
   uuid: ^4.6.0
 
+# shared_preferences_android 2.5.x 在当前 Kotlin/AGP 组合下运行时报
+# SharedPreferencesApiRegistrar.getAll 方法签名不匹配；固定到旧版通道实现。
+dependency_overrides:
+  shared_preferences_android: 2.4.1
+
 flutter:
   uses-material-design: true
   assets:

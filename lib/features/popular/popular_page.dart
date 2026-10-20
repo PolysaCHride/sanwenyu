@@ -211,6 +211,8 @@ class _PopularPageState extends ConsumerState<PopularPage> {
         : raw;
     setState(() {
       _classifying = false;
+      // 识别失败时关闭过滤开关，避免列表仍混着非韩剧却显示“过滤中”。
+      if (!anyKnown) _koreanOnly = false;
       if (replace) {
         _items = filtered;
       } else {

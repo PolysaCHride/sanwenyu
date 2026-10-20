@@ -99,10 +99,13 @@ class TmdbClassifier {
         } on TmdbException catch (e) {
           if (e.statusCode == 401 || e.statusCode == 429) {
             _failureAt = DateTime.now();
+            return;
           }
-          // 单条失败保持 unknown，不影响其他条目。
+          // 单条业务失败保持 unknown，不影响其他条目。
         } on Object {
-          // 网络错误同样保持 unknown。
+          // 网络不可用/超时时停止本批剩余请求，避免几十条各等一次超时。
+          _failureAt = DateTime.now();
+          return;
         }
       }
     }
