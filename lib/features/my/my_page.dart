@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/feature_flags.dart';
 import '../../app/providers.dart';
 import '../../l10n/l10n.dart';
 
@@ -14,8 +15,14 @@ class MyPage extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final L10n l = L10n.of(context);
-    final int favorites = ref.read(libraryRepositoryProvider).favorites().length;
-    final int history = ref.read(libraryRepositoryProvider).history(limit: 999).length;
+    final int favorites = ref
+        .read(libraryRepositoryProvider)
+        .favorites()
+        .length;
+    final int history = ref
+        .read(libraryRepositoryProvider)
+        .history(limit: 999)
+        .length;
     final int sources = ref.read(sourceRepositoryProvider).all().length;
 
     return Scaffold(
@@ -66,25 +73,63 @@ class MyPage extends ConsumerWidget {
           SliverList(
             delegate: SliverChildListDelegate(<Widget>[
               _group(context, <_Entry>[
-                _Entry(Icons.dns_outlined, l.sources, l.sourcesHint, () => context.push('/sources')),
-                _Entry(Icons.play_circle_outline, l.playerSettings, l.playerSettingsHint,
-                    () => context.push('/settings/player')),
-                _Entry(Icons.palette_outlined, l.theme, l.themeHint,
-                    () => context.push('/settings/theme')),
-                _Entry(Icons.translate, l.language, l.languageHint,
-                    () => context.push('/settings/language')),
-                _Entry(Icons.theaters_outlined, l.metadataTitle, l.metadataHint,
-                    () => context.push('/settings/metadata')),
-                _Entry(Icons.history, l.history, l.historyHint,
-                    () => context.push('/settings/history')),
+                _Entry(
+                  Icons.dns_outlined,
+                  l.sources,
+                  l.sourcesHint,
+                  () => context.push('/sources'),
+                ),
+                _Entry(
+                  Icons.play_circle_outline,
+                  l.playerSettings,
+                  l.playerSettingsHint,
+                  () => context.push('/settings/player'),
+                ),
+                _Entry(
+                  Icons.palette_outlined,
+                  l.theme,
+                  l.themeHint,
+                  () => context.push('/settings/theme'),
+                ),
+                _Entry(
+                  Icons.translate,
+                  l.language,
+                  l.languageHint,
+                  () => context.push('/settings/language'),
+                ),
+                _Entry(
+                  Icons.theaters_outlined,
+                  l.metadataTitle,
+                  l.metadataHint,
+                  () => context.push('/settings/metadata'),
+                ),
+                _Entry(
+                  Icons.history,
+                  l.history,
+                  l.historyHint,
+                  () => context.push('/settings/history'),
+                ),
               ]),
               _group(context, <_Entry>[
-                _Entry(Icons.cloud_sync_outlined, l.sync, l.syncHint,
-                    () => context.push('/settings/sync')),
-                _Entry(Icons.bug_report_outlined, l.logs, l.logsHint,
-                    () => context.push('/settings/logs')),
-                _Entry(Icons.info_outline, l.about, l.aboutHint,
-                    () => context.push('/settings/about')),
+                if (AppFeatures.webDavSync)
+                  _Entry(
+                    Icons.cloud_sync_outlined,
+                    l.sync,
+                    l.syncHint,
+                    () => context.push('/settings/sync'),
+                  ),
+                _Entry(
+                  Icons.bug_report_outlined,
+                  l.logs,
+                  l.logsHint,
+                  () => context.push('/settings/logs'),
+                ),
+                _Entry(
+                  Icons.info_outline,
+                  l.about,
+                  l.aboutHint,
+                  () => context.push('/settings/about'),
+                ),
               ]),
               const SizedBox(height: 24),
             ]),
@@ -101,10 +146,9 @@ class MyPage extends ConsumerWidget {
         children: <Widget>[
           Text(
             value,
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(fontWeight: FontWeight.w700),
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 2),
           Text(label, style: TextStyle(fontSize: 12, color: scheme.outline)),
@@ -124,7 +168,10 @@ class MyPage extends ConsumerWidget {
             for (var i = 0; i < entries.length; i++) ...<Widget>[
               ListTile(
                 leading: Icon(entries[i].icon, size: 22),
-                title: Text(entries[i].title, style: const TextStyle(fontSize: 15)),
+                title: Text(
+                  entries[i].title,
+                  style: const TextStyle(fontSize: 15),
+                ),
                 subtitle: Text(
                   entries[i].subtitle,
                   style: TextStyle(fontSize: 11, color: scheme.outline),

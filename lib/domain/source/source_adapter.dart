@@ -26,6 +26,9 @@ abstract class SourceAdapter {
 
   /// 该源支持的内容分类（首页筛选）。默认空。
   List<Category> get categories => const <Category>[];
+
+  /// 分类可能来自远端（如 MacCMS 的 `ac=list`），首页启动时异步加载。
+  Future<List<Category>> loadCategories() async => categories;
 }
 
 /// 分类项。

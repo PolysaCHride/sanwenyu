@@ -35,4 +35,14 @@ class BrightnessService {
       return false;
     }
   }
+
+  /// 退出播放页时恢复系统亮度。
+  Future<void> reset() async {
+    if (!supported) return;
+    try {
+      await _channel.invokeMethod<void>('reset');
+    } on Object {
+      // 忽略：窗口销毁时系统也会恢复。
+    }
+  }
 }

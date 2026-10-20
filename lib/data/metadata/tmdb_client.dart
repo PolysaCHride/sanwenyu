@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../../core/network/http_client.dart';
 import '../../core/utils/text_utils.dart';
 import '../../domain/models/credits.dart';
+import 'tmdb_title_match.dart';
 
 /// TMDB 调用失败。
 class TmdbException implements Exception {
@@ -12,7 +13,8 @@ class TmdbException implements Exception {
   final int? statusCode;
 
   @override
-  String toString() => statusCode == null ? message : 'HTTP $statusCode: $message';
+  String toString() =>
+      statusCode == null ? message : 'HTTP $statusCode: $message';
 }
 
 /// TMDB v3 客户端（用户自备 Key）。
@@ -31,8 +33,8 @@ class TmdbClient {
 
   /// 搜索剧集并取演职员；匹配不到返回 [SeriesCredits.empty]（tmdbId 为 null）。
   Future<SeriesCredits> creditsFor({required String title, int? year}) async {
-    final int? id = await _searchSeries(title: title, year: year);
-    if (id == null) {
+    final TmdbTitleMatch? match = await matchTitle(title: title, year: year);
+    if (match == null) {
       return SeriesCredits(
         tmdbId: null,
         cast: const <CastMember>[],
@@ -40,6 +42,7 @@ class TmdbClient {
         fetchedAt: DateTime.now(),
       );
     }
+    final int id = match.id;
 
     final Response<dynamic> resp = await _http.getJson(
       '$_base/tv/$id/credits',
@@ -79,12 +82,21 @@ class TmdbClient {
     );
   }
 
-  Future<int?> _searchSeries({required String title, int? year}) async {
-    final List<String> queries = <String>[
-      title.trim(),
-      cleanTitle(title),
-    ].where((String q) => q.isNotEmpty).toSet().toList();
+  /// 搜索并匹配一部剧；匹配不到返回 null。
+  ///
+  /// 同时用原名、清理后的名称、归一化名称查询，避免「第九季」「(2024)」
+  /// 这类后缀导致 TMDB 搜不到。
+  Future<TmdbTitleMatch?> matchTitle({required String title, int? year}) async {
+    final String raw = title.trim();
+    if (raw.isEmpty) return null;
+    final Set<String> queries = <String>{
+      raw,
+      cleanTitle(raw),
+      normalizeTitle(raw),
+    }..removeWhere((String q) => q.trim().isEmpty);
+    if (queries.isEmpty) return null;
 
+    final Map<int, TmdbTitleMatch> candidates = <int, TmdbTitleMatch>{};
     for (final String query in queries) {
       final Response<dynamic> resp = await _http.getJson(
         '$_base/search/tv',
@@ -93,7 +105,6 @@ class TmdbClient {
           'language': language,
           'query': query,
           'include_adult': 'false',
-          if (year != null) 'first_air_date_year': '$year',
         },
       );
       _ensureOk(resp);
@@ -102,11 +113,24 @@ class TmdbClient {
       if (results is! List) continue;
       for (final Object? item in results) {
         if (item is! Map) continue;
-        final int? id = (_stringKeyed(item)['id'] as num?)?.toInt();
-        if (id != null) return id;
+        final TmdbTitleMatch match = TmdbTitleMatch.fromJson(
+          _stringKeyed(item),
+        );
+        if (match.id > 0) candidates[match.id] = match;
       }
     }
-    return null;
+
+    TmdbTitleMatch? best;
+    int bestScore = 0;
+    for (final TmdbTitleMatch candidate in candidates.values) {
+      final int score = tmdbTitleScore(candidate, queries, year);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    // 只接受标题确实对得上的结果，避免把同名词条/无关结果当成韩剧。
+    return bestScore >= 60 ? best : null;
   }
 
   /// 设置页的连接测试：只验证 Key 是否可用。
@@ -135,7 +159,9 @@ class TmdbClient {
   }
 
   static Map<String, dynamic> _stringKeyed(Map<dynamic, dynamic> map) {
-    return map.map((dynamic key, dynamic value) => MapEntry<String, dynamic>(key.toString(), value));
+    return map.map(
+      (dynamic key, dynamic value) =>
+          MapEntry<String, dynamic>(key.toString(), value),
+    );
   }
 }
-

@@ -1,11 +1,10 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// TMDB 配置（用户自备 Key）。
+import 'tmdb_key.dart';
+
+/// TMDB 配置（用户自备 Key，也可由构建参数注入内置 Key）。
 class TmdbSettings {
-  const TmdbSettings({
-    this.apiKey = '',
-    this.language = 'zh-CN',
-  });
+  const TmdbSettings({this.apiKey = '', this.language = 'zh-CN'});
 
   static const String keyApi = 'tmdb.apiKey';
   static const String keyLanguage = 'tmdb.language';
@@ -13,7 +12,13 @@ class TmdbSettings {
   final String apiKey;
   final String language;
 
-  bool get enabled => apiKey.trim().isNotEmpty;
+  /// 用户填写的 Key 优先；没有时使用构建时注入的 Key。
+  String get effectiveApiKey {
+    final String custom = apiKey.trim();
+    return custom.isNotEmpty ? custom : kTmdbApiKey.trim();
+  }
+
+  bool get enabled => effectiveApiKey.isNotEmpty;
 
   TmdbSettings copyWith({String? apiKey, String? language}) {
     return TmdbSettings(

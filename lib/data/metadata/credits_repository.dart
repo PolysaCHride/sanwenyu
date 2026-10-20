@@ -69,7 +69,8 @@ class CreditsRepository {
       final SeriesCredits? hit = cached(seriesId);
       if (hit != null) return hit.isEmpty ? null : hit;
       final DateTime? failedAt = _failureAt;
-      if (failedAt != null && DateTime.now().difference(failedAt) < failureCooldown) {
+      if (failedAt != null &&
+          DateTime.now().difference(failedAt) < failureCooldown) {
         return null;
       }
     }
@@ -77,7 +78,7 @@ class CreditsRepository {
 
     try {
       final SeriesCredits credits = await TmdbClient(
-        apiKey: settings.apiKey,
+        apiKey: settings.effectiveApiKey,
         language: settings.language,
         http: _http,
       ).creditsFor(title: title, year: year);

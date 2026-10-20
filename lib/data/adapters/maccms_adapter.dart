@@ -12,8 +12,8 @@ import '../../domain/source/source_adapter.dart';
 /// 只需配置站点根地址，即可完成搜索、详情与选集。
 class MaccmsAdapter extends SourceAdapter {
   MaccmsAdapter({required SourceConfig config, required HttpClient http})
-      : _config = config,
-        _http = http;
+    : _config = config,
+      _http = http;
 
   final SourceConfig _config;
   final HttpClient _http;
@@ -29,9 +29,9 @@ class MaccmsAdapter extends SourceAdapter {
   String get _api => '$_base/api.php/provide/vod/';
 
   Map<String, String> get _headers => <String, String>{
-        'Referer': _base,
-        'Accept': 'application/json, text/plain, */*',
-      };
+    'Referer': _base,
+    'Accept': 'application/json, text/plain, */*',
+  };
 
   @override
   Future<List<SearchHit>> search(String keyword, {int page = 1}) async {
@@ -63,6 +63,52 @@ class MaccmsAdapter extends SourceAdapter {
   @override
   List<Category> get categories => _categories;
 
+  List<Category>? _remoteCategories;
+
+  @override
+  Future<List<Category>> loadCategories() async {
+    if (_remoteCategories != null) return _remoteCategories!;
+    try {
+      final resp = await _http.getJson(
+        _api,
+        query: <String, dynamic>{'ac': 'list'},
+        headers: _headers,
+      );
+      final Object? data = decodeJson(resp.data);
+      final Object? raw = data is Map ? data['class'] : null;
+      final Map<String, String> names = <String, String>{};
+      if (raw is List) {
+        for (final Object? item in raw) {
+          if (item is! Map) continue;
+          final String id = (item['type_id'] ?? '').toString();
+          final String name = (item['type_name'] ?? '').toString().trim();
+          if (id.isNotEmpty && name.isNotEmpty) names[id] = name;
+        }
+      }
+      if (names.isEmpty) return _remoteCategories = _categories;
+
+      final List<Category> out = <Category>[
+        const Category(id: '', name: '最新更新'),
+      ];
+      // 韩剧分类优先，其次是四个通用分类。注意排除「日韩综艺/日韩动漫」。
+      for (final MapEntry<String, String> e in names.entries) {
+        if (_isKoreanDramaName(e.value)) {
+          out.add(Category(id: e.key, name: e.value));
+        }
+      }
+      for (final String id in const <String>['1', '2', '3', '4']) {
+        final String? name = names[id];
+        if (name != null && !out.any((Category c) => c.id == id)) {
+          out.add(Category(id: id, name: name));
+        }
+      }
+      _remoteCategories = out;
+      return out;
+    } on Object {
+      return _remoteCategories = _categories;
+    }
+  }
+
   static const List<Category> _categories = <Category>[
     Category(id: '', name: '最新更新'),
     Category(id: '1', name: '电影'),
@@ -71,17 +117,28 @@ class MaccmsAdapter extends SourceAdapter {
     Category(id: '4', name: '动漫'),
   ];
 
+  static bool _isKoreanDramaName(String name) {
+    return name.contains('韩剧') ||
+        name.contains('韩国剧') ||
+        name.contains('韩国电视剧');
+  }
+
   List<SearchHit> _toHits(List<Map<String, dynamic>> list) {
     return list
-        .map((Map<String, dynamic> item) => SearchHit(
-              title: (item['vod_name'] ?? '').toString(),
-              sourceId: _config.id,
-              sourceName: _config.name,
-              sourceKey: (item['vod_id'] ?? '').toString(),
-              cover: _nonEmpty(item['vod_pic']?.toString()),
-              remark: _nonEmpty(item['vod_remarks']?.toString()),
-              year: parseYear(item['vod_year']?.toString() ?? item['vod_name']?.toString()),
-            ))
+        .map(
+          (Map<String, dynamic> item) => SearchHit(
+            title: (item['vod_name'] ?? '').toString(),
+            sourceId: _config.id,
+            sourceName: _config.name,
+            sourceKey: (item['vod_id'] ?? '').toString(),
+            cover: _nonEmpty(item['vod_pic']?.toString()),
+            remark: _nonEmpty(item['vod_remarks']?.toString()),
+            year: parseYear(
+              item['vod_year']?.toString() ?? item['vod_name']?.toString(),
+            ),
+            category: _nonEmpty(item['type_name']?.toString()),
+          ),
+        )
         .where((SearchHit h) => h.title.isNotEmpty && h.sourceKey.isNotEmpty)
         .toList();
   }
@@ -152,11 +209,13 @@ class MaccmsAdapter extends SourceAdapter {
       final name = idx >= 0 ? seg.substring(0, idx) : 'EP${i + 1}';
       final link = idx >= 0 ? seg.substring(idx + 1) : seg;
       if (link.trim().isEmpty) continue;
-      out.add(EpisodeRef(
-        index: parseEpisodeIndex(name, i + 1),
-        title: name.trim().isEmpty ? 'EP${i + 1}' : name.trim(),
-        ref: link.trim(),
-      ));
+      out.add(
+        EpisodeRef(
+          index: parseEpisodeIndex(name, i + 1),
+          title: name.trim().isEmpty ? 'EP${i + 1}' : name.trim(),
+          ref: link.trim(),
+        ),
+      );
     }
     return out;
   }
@@ -195,8 +254,13 @@ class MaccmsAdapter extends SourceAdapter {
     if (data is Map) {
       final raw = data['list'];
       if (raw is List) {
-        return raw.whereType<Map<dynamic, dynamic>>().map((Map<dynamic, dynamic> e) {
-          return e.map((dynamic k, dynamic v) => MapEntry<String, dynamic>(k.toString(), v));
+        return raw.whereType<Map<dynamic, dynamic>>().map((
+          Map<dynamic, dynamic> e,
+        ) {
+          return e.map(
+            (dynamic k, dynamic v) =>
+                MapEntry<String, dynamic>(k.toString(), v),
+          );
         }).toList();
       }
     }
@@ -218,5 +282,6 @@ class MaccmsAdapter extends SourceAdapter {
         .toList();
   }
 
-  String? _nonEmpty(String? s) => (s == null || s.trim().isEmpty) ? null : s.trim();
+  String? _nonEmpty(String? s) =>
+      (s == null || s.trim().isEmpty) ? null : s.trim();
 }

@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/l10n.dart';
+import 'feature_flags.dart';
 import 'locale.dart';
 import 'providers.dart';
 import 'router.dart';
@@ -31,7 +32,10 @@ class SanwenyuApp extends ConsumerWidget {
         darkTheme: AppTheme.dark(),
         themeMode: mode,
         locale: locale,
-        supportedLocales: const <Locale>[LocalePreferences.zh, LocalePreferences.en],
+        supportedLocales: const <Locale>[
+          LocalePreferences.zh,
+          LocalePreferences.en,
+        ],
         localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
           L10nDelegate(),
           GlobalMaterialLocalizations.delegate,
@@ -58,7 +62,9 @@ class _SyncBootstrapState extends ConsumerState<_SyncBootstrap> {
   @override
   void initState() {
     super.initState();
-    ref.read(syncServiceProvider).start();
+    if (AppFeatures.webDavSync) {
+      ref.read(syncServiceProvider).start();
+    }
   }
 
   @override

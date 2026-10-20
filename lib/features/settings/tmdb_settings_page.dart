@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/metadata/tmdb_client.dart';
+import '../../data/metadata/tmdb_key.dart';
 import '../../data/metadata/tmdb_settings.dart';
 import '../../l10n/l10n.dart';
 
@@ -19,12 +20,13 @@ class _TmdbSettingsPageState extends ConsumerState<TmdbSettingsPage> {
   String _language = 'zh-CN';
   bool _busy = false;
 
-  static const List<MapEntry<String, String>> _languages = <MapEntry<String, String>>[
-    MapEntry<String, String>('zh-CN', '简体中文'),
-    MapEntry<String, String>('zh-TW', '繁體中文'),
-    MapEntry<String, String>('en-US', 'English'),
-    MapEntry<String, String>('ko-KR', '한국어'),
-  ];
+  static const List<MapEntry<String, String>> _languages =
+      <MapEntry<String, String>>[
+        MapEntry<String, String>('zh-CN', '简体中文'),
+        MapEntry<String, String>('zh-TW', '繁體中文'),
+        MapEntry<String, String>('en-US', 'English'),
+        MapEntry<String, String>('ko-KR', '한국어'),
+      ];
 
   @override
   void initState() {
@@ -47,34 +49,44 @@ class _TmdbSettingsPageState extends ConsumerState<TmdbSettingsPage> {
     });
   }
 
-  TmdbSettings get _form => TmdbSettings(apiKey: _key.text, language: _language);
+  TmdbSettings get _form =>
+      TmdbSettings(apiKey: _key.text, language: _language);
 
   Future<void> _save() async {
     await TmdbSettings.save(_form);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(L10n.of(context).ruleSaved)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(L10n.of(context).ruleSaved)));
   }
 
   Future<void> _test() async {
     final L10n l = L10n.of(context);
+    final String key = _form.apiKey.trim().isEmpty
+        ? kTmdbApiKey.trim()
+        : _form.apiKey.trim();
+    if (key.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.tmdbKeyMissing)));
+      return;
+    }
     setState(() => _busy = true);
     try {
       await TmdbClient(
-        apiKey: _form.apiKey.trim(),
+        apiKey: key,
         language: _form.language,
         http: ref.read(httpClientProvider),
       ).testConnection();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.tmdbTestOk)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.tmdbTestOk)));
     } on Object catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${l.tmdbTestFailed}: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${l.tmdbTestFailed}: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -106,18 +118,33 @@ class _TmdbSettingsPageState extends ConsumerState<TmdbSettingsPage> {
                   TextField(
                     controller: _key,
                     obscureText: true,
+                    onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
                       labelText: l.tmdbApiKey,
                       hintText: l.tmdbKeyHint,
                     ),
                   ),
+                  if (kTmdbApiKey.trim().isNotEmpty && _key.text.trim().isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          l.tmdbBuiltInKey,
+                          style: TextStyle(fontSize: 12, color: scheme.outline),
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     initialValue: _language,
                     decoration: InputDecoration(labelText: l.tmdbLanguage),
                     items: <DropdownMenuItem<String>>[
                       for (final MapEntry<String, String> entry in _languages)
-                        DropdownMenuItem<String>(value: entry.key, child: Text(entry.value)),
+                        DropdownMenuItem<String>(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        ),
                     ],
                     onChanged: (String? value) {
                       if (value != null) setState(() => _language = value);
@@ -147,7 +174,11 @@ class _TmdbSettingsPageState extends ConsumerState<TmdbSettingsPage> {
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Text(
               l.tmdbNote,
-              style: TextStyle(fontSize: 12, color: scheme.outline, height: 1.5),
+              style: TextStyle(
+                fontSize: 12,
+                color: scheme.outline,
+                height: 1.5,
+              ),
             ),
           ),
         ],

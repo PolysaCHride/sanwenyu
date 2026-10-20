@@ -2,7 +2,10 @@
 library;
 
 final RegExp _brackets = RegExp(r'[\(（\[【][^\)）\]】]*[\)）\]】]');
-final RegExp _season = RegExp(r'第\s*[0-9一二三四五六七八九十]+\s*季');
+final RegExp _season = RegExp(
+  r'(第\s*[0-9一二三四五六七八九十]+\s*季|Season\s*\d+)',
+  caseSensitive: false,
+);
 final RegExp _punct = RegExp(r"""[\s\-_:：·,，.。!！?？"“”'’、/|]""");
 final RegExp _nonWord = RegExp(r'[^\w\u4e00-\u9fa5]');
 
@@ -57,7 +60,8 @@ bool isSameSeries(String a, String b, {int? yearA, int? yearB}) {
   final nb = normalizeTitle(b);
   if (na.isEmpty || nb.isEmpty) return false;
   if (na == nb) {
-    if (yearA != null && yearB != null && (yearA - yearB).abs() > 1) return false;
+    if (yearA != null && yearB != null && (yearA - yearB).abs() > 1)
+      return false;
     return true;
   }
   if (similarity(na, nb) >= 0.86 &&
@@ -70,7 +74,11 @@ bool isSameSeries(String a, String b, {int? yearA, int? yearB}) {
 /// 从文本中按正则取第一个分组。
 String? firstGroup(String text, String pattern, {int group = 1}) {
   try {
-    final m = RegExp(pattern, caseSensitive: false, dotAll: true).firstMatch(text);
+    final m = RegExp(
+      pattern,
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(text);
     if (m == null) return null;
     final v = m.group(group);
     return (v == null || v.trim().isEmpty) ? null : v.trim();

@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/feature_flags.dart';
 import '../../app/providers.dart';
 import '../../core/logger.dart';
 import '../../core/platform/brightness_service.dart';
+import '../../core/platform/volume_service.dart';
 import '../../core/player/m3u8_playlist.dart';
 import '../../core/player/media_kit_engine.dart';
 import '../../core/player/player_config.dart';
@@ -51,11 +53,22 @@ class PlayerPage extends ConsumerStatefulWidget {
 
 class _PlayerPageState extends ConsumerState<PlayerPage> {
   final BrightnessService _brightnessService = const BrightnessService();
-  final ValueNotifier<Duration> _position = ValueNotifier<Duration>(Duration.zero);
-  final ValueNotifier<Duration> _duration = ValueNotifier<Duration>(Duration.zero);
+  final VolumeService _volumeService = const VolumeService();
+  bool _systemVolume = false;
+  StreamSubscription<VolumeState>? _volumeSub;
+  Timer? _volumeWriteTimer;
+  double _volumeBeforeMute = 100;
+  final ValueNotifier<Duration> _position = ValueNotifier<Duration>(
+    Duration.zero,
+  );
+  final ValueNotifier<Duration> _duration = ValueNotifier<Duration>(
+    Duration.zero,
+  );
   final ValueNotifier<bool> _playing = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _buffering = ValueNotifier<bool>(false);
-  final ValueNotifier<GestureFeedback?> _hud = ValueNotifier<GestureFeedback?>(null);
+  final ValueNotifier<GestureFeedback?> _hud = ValueNotifier<GestureFeedback?>(
+    null,
+  );
 
   late PlayerConfig _config = PlayerPreferences.current;
   late final LibraryRepository _library;
@@ -84,7 +97,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   double _speed = 1.0;
   double _volume = 100;
-  double _brightness = 1.0;
+  final ValueNotifier<double> _brightness = ValueNotifier<double>(1.0);
   bool _brightnessNative = false;
   double _verticalBase = 1.0;
   int _verticalZone = 0;
@@ -107,7 +120,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _volume = _config.volume;
     _buildEngine();
     _loadBrightness();
-    _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
+    _initVolume();
+    _saveTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _saveProgress(),
+    );
     _bootstrap();
   }
 
@@ -117,6 +134,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _hideTimer?.cancel();
     _saveTimer?.cancel();
     _hudTimer?.cancel();
+    _volumeWriteTimer?.cancel();
+    unawaited(_volumeSub?.cancel() ?? Future<void>.value());
     _detachEngine();
     unawaited(_engine?.dispose() ?? Future<void>.value());
     _position.dispose();
@@ -124,6 +143,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _playing.dispose();
     _buffering.dispose();
     _hud.dispose();
+    _brightness.dispose();
+    unawaited(_brightnessService.reset());
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     super.dispose();
   }
@@ -159,7 +180,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _subscriptions.clear();
   }
 
-  Future<void> _recreateEngine({PlayerConfig? config, Duration? resumeAt}) async {
+  Future<void> _recreateEngine({
+    PlayerConfig? config,
+    Duration? resumeAt,
+  }) async {
     final Duration position = resumeAt ?? _position.value;
     final String? url = _resolvedUrl;
     final Map<String, String> headers = _resolvedHeaders;
@@ -181,19 +205,24 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       return;
     }
     try {
-      await _engine!.open(MediaRequest(
-        url: url,
-        headers: headers,
-        startAt: position > Duration.zero ? position : null,
-        title: current?.title,
-      ));
+      await _engine!.open(
+        MediaRequest(
+          url: url,
+          headers: headers,
+          startAt: position > Duration.zero ? position : null,
+          title: current?.title,
+        ),
+      );
       if (!mounted) return;
       setState(() => _resolving = false);
     } on Object catch (e) {
       if (!mounted) return;
       setState(() {
         _resolving = false;
-        _failure = PlayerFailure(kind: FailureKind.unknown, detail: e.toString());
+        _failure = PlayerFailure(
+          kind: FailureKind.unknown,
+          detail: e.toString(),
+        );
       });
     }
   }
@@ -213,7 +242,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     if (!mounted) return;
     final L10n l = L10n.of(context);
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      SnackBar(content: Text(l.rendererFallback), duration: const Duration(seconds: 3)),
+      SnackBar(
+        content: Text(l.rendererFallback),
+        duration: const Duration(seconds: 3),
+      ),
     );
   }
 
@@ -256,8 +288,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   SourceAdapter? _adapter() {
     final repo = ref.read(sourceRepositoryProvider);
-    final SourceConfig? config =
-        repo.all().where((SourceConfig s) => s.id == widget.sourceId).firstOrNull;
+    final SourceConfig? config = repo
+        .all()
+        .where((SourceConfig s) => s.id == widget.sourceId)
+        .firstOrNull;
     if (config == null) return null;
     return repo.adapterFor(config);
   }
@@ -268,8 +302,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
       List<EpisodeRef> episodes = _library.episodesOf(widget.seriesId);
       if (episodes.isEmpty) {
-        final SourceConfig? config =
-            repo.all().where((SourceConfig s) => s.id == widget.sourceId).firstOrNull;
+        final SourceConfig? config = repo
+            .all()
+            .where((SourceConfig s) => s.id == widget.sourceId)
+            .firstOrNull;
         if (config == null) throw StateError('source not found');
         final SourceAdapter? adapter = repo.adapterFor(config);
         if (adapter == null) throw StateError('adapter unavailable');
@@ -303,7 +339,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       if (!mounted) return;
       setState(() {
         _bootLoading = false;
-        _failure = PlayerFailure(kind: FailureKind.unknown, detail: e.toString());
+        _failure = PlayerFailure(
+          kind: FailureKind.unknown,
+          detail: e.toString(),
+        );
       });
     }
   }
@@ -333,31 +372,45 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     try {
       final SourceAdapter? adapter = _adapter();
       if (adapter == null) throw StateError('source unavailable');
-      final PlayInfo info = await adapter.resolve(episode, detailUrl: widget.sourceKey);
+      final PlayInfo info = await adapter.resolve(
+        episode,
+        detailUrl: widget.sourceKey,
+      );
       final String? directUrl = info.url;
-      if (info.mode != PlayMode.direct || directUrl == null || directUrl.isEmpty) {
+      if (info.mode != PlayMode.direct ||
+          directUrl == null ||
+          directUrl.isEmpty) {
         throw StateError(info.message ?? 'resolve failed');
       }
 
-      final List<QualityOption> qualities = await PlaylistProbe(ref.read(httpClientProvider))
-          .inspect(directUrl, headers: info.headers)
-          .timeout(const Duration(seconds: 3), onTimeout: () => const <QualityOption>[]);
-      final QualityOption? picked = M3u8Master.pick(qualities, _config.preferredQuality);
+      final List<QualityOption> qualities =
+          await PlaylistProbe(ref.read(httpClientProvider))
+              .inspect(directUrl, headers: info.headers)
+              .timeout(
+                const Duration(seconds: 3),
+                onTimeout: () => const <QualityOption>[],
+              );
+      final QualityOption? picked = M3u8Master.pick(
+        qualities,
+        _config.preferredQuality,
+      );
       final String url = picked?.url ?? directUrl;
 
       _resolvedUrl = url;
       _resolvedHeaders = info.headers;
-      final Duration? resume = startAt ??
-          (initial ? _resumePositionFor(episode) : null);
+      final Duration? resume =
+          startAt ?? (initial ? _resumePositionFor(episode) : null);
 
-      await _engine?.open(MediaRequest(
-        url: url,
-        headers: info.headers,
-        startAt: resume,
-        title: episode.title,
-      ));
+      await _engine?.open(
+        MediaRequest(
+          url: url,
+          headers: info.headers,
+          startAt: resume,
+          title: episode.title,
+        ),
+      );
       await _engine?.setRate(_speed);
-      await _engine?.setVolume(_volume);
+      await _engine?.setVolume(_volumeService.supported ? 100 : _volume);
 
       if (!mounted) return;
       setState(() {
@@ -372,7 +425,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       setState(() {
         _resolving = false;
         _bootLoading = false;
-        _failure = PlayerFailure(kind: FailureKind.unknown, detail: e.toString());
+        _failure = PlayerFailure(
+          kind: FailureKind.unknown,
+          detail: e.toString(),
+        );
       });
     }
   }
@@ -383,9 +439,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final String expected = '${widget.seriesId}#${episode.index}';
     if (record.episodeId != expected) return null;
     if (record.duration <= Duration.zero) return null;
-    final double ratio = record.position.inMilliseconds / record.duration.inMilliseconds;
+    final double ratio =
+        record.position.inMilliseconds / record.duration.inMilliseconds;
     if (ratio >= 0.95) return null;
-    return record.position > const Duration(seconds: 5) ? record.position : null;
+    return record.position > const Duration(seconds: 5)
+        ? record.position
+        : null;
   }
 
   void _saveProgress() {
@@ -448,12 +507,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       _resolving = true;
     });
     try {
-      await _engine?.open(MediaRequest(
-        url: url,
-        headers: _resolvedHeaders,
-        startAt: _position.value > Duration.zero ? _position.value : null,
-        title: _current?.title,
-      ));
+      await _engine?.open(
+        MediaRequest(
+          url: url,
+          headers: _resolvedHeaders,
+          startAt: _position.value > Duration.zero ? _position.value : null,
+          title: _current?.title,
+        ),
+      );
       if (!mounted) return;
       setState(() => _resolving = false);
       _scheduleHide();
@@ -461,7 +522,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       if (!mounted) return;
       setState(() {
         _resolving = false;
-        _failure = PlayerFailure(kind: FailureKind.unknown, detail: e.toString());
+        _failure = PlayerFailure(
+          kind: FailureKind.unknown,
+          detail: e.toString(),
+        );
       });
     }
   }
@@ -481,11 +545,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   void _onSeekPreview(Duration target) {
-    _showHud(GestureFeedback(
-      HudKind.seek,
-      '${formatDuration(target)} / ${formatDuration(_duration.value)}',
-      icon: Icons.fast_forward,
-    ));
+    _showHud(
+      GestureFeedback(
+        HudKind.seek,
+        '${formatDuration(target)} / ${formatDuration(_duration.value)}',
+        icon: Icons.fast_forward,
+      ),
+    );
   }
 
   void _onSeekCommit(Duration target) {
@@ -496,37 +562,51 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   void _onVerticalStart(int zone) {
     _verticalZone = zone;
-    _verticalBase = zone == 0 ? _brightness : _volume;
+    _verticalBase = zone == 0 ? _brightness.value : _volume;
   }
 
   void _onVerticalUpdate(int zone, double ratio) {
     if (zone == 0) {
       final double value = (_verticalBase + ratio).clamp(0.05, 1.0);
-      _brightness = value;
+      _brightness.value = value;
       if (_brightnessNative) {
-        unawaited(_brightnessService.write(value));
+        unawaited(_writeBrightness(value));
       }
-      _showHud(GestureFeedback(
-        HudKind.brightness,
-        '${(value * 100).round()}%',
-        icon: Icons.brightness_6,
-      ));
+      _showHud(
+        GestureFeedback(
+          HudKind.brightness,
+          '${(value * 100).round()}%',
+          icon: Icons.brightness_6,
+        ),
+      );
     } else {
       final double value = (_verticalBase + ratio * 100).clamp(0.0, 100.0);
-      _volume = value;
-      unawaited(_engine?.setVolume(value));
-      _showHud(GestureFeedback(
-        HudKind.volume,
-        '${value.round()}%',
-        icon: value == 0 ? Icons.volume_off : Icons.volume_up,
-      ));
+      _setVolume(value);
+      _showHud(
+        GestureFeedback(
+          HudKind.volume,
+          '${value.round()}%',
+          icon: value == 0 ? Icons.volume_off : Icons.volume_up,
+        ),
+      );
+    }
+  }
+
+  Future<void> _writeBrightness(double value) async {
+    final bool ok = await _brightnessService.write(value);
+    if (!ok && mounted && _brightnessNative) {
+      setState(() => _brightnessNative = false);
     }
   }
 
   void _onVerticalEnd() {
     if (_verticalZone == 1) {
-      _config = _config.copyWith(volume: _volume);
-      unawaited(PlayerPreferences.update(_config));
+      if (_systemVolume) {
+        _setVolume(_volume, immediate: true);
+      } else {
+        _config = _config.copyWith(volume: _volume);
+        unawaited(PlayerPreferences.update(_config));
+      }
     }
     _hudTimer?.cancel();
     _hudTimer = Timer(const Duration(milliseconds: 400), () {
@@ -537,7 +617,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   void _onLongPressStart() {
     _speedBeforeLongPress = _speed;
     unawaited(_engine?.setRate(2.0));
-    _showHud(const GestureFeedback(HudKind.seek, '2.0x', icon: Icons.fast_forward));
+    _showHud(
+      const GestureFeedback(HudKind.seek, '2.0x', icon: Icons.fast_forward),
+    );
   }
 
   void _onLongPressEnd() {
@@ -551,8 +633,48 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     if (!mounted) return;
     setState(() {
       _brightnessNative = value != null;
-      _brightness = value ?? 1.0;
     });
+    _brightness.value = value ?? 1.0;
+  }
+
+  Future<void> _initVolume() async {
+    final VolumeState? state = await _volumeService.read();
+    if (!mounted || state == null || state.fixed) return;
+    setState(() {
+      _systemVolume = true;
+      _volume = state.ratio * 100;
+    });
+    unawaited(_engine?.setVolume(100));
+    _volumeSub = _volumeService.changes.listen((VolumeState next) {
+      _volume = next.ratio * 100;
+    });
+  }
+
+  void _setVolume(double percent, {bool immediate = false}) {
+    _volume = percent.clamp(0, 100);
+    if (!_systemVolume) {
+      unawaited(_engine?.setVolume(_volume));
+      return;
+    }
+    _volumeWriteTimer?.cancel();
+    if (immediate) {
+      unawaited(_writeSystemVolume());
+    } else {
+      _volumeWriteTimer = Timer(const Duration(milliseconds: 40), () {
+        unawaited(_writeSystemVolume());
+      });
+    }
+  }
+
+  Future<void> _writeSystemVolume() async {
+    final VolumeState? state = await _volumeService.write(_volume / 100);
+    if (!mounted) return;
+    if (state == null) {
+      setState(() => _systemVolume = false);
+      unawaited(_engine?.setVolume(_volume));
+      return;
+    }
+    _volume = state.ratio * 100;
   }
 
   Future<void> _toggleImmersive() async {
@@ -584,7 +706,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     await Clipboard.setData(ClipboardData(text: url));
     if (!mounted) return;
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      SnackBar(content: Text(L10n.of(context).copied), duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Text(L10n.of(context).copied),
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
@@ -599,12 +724,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     });
     final Duration position = _position.value;
     _engine
-        ?.open(MediaRequest(
-          url: option.url,
-          headers: _resolvedHeaders,
-          startAt: position > Duration.zero ? position : null,
-          title: ep.title,
-        ))
+        ?.open(
+          MediaRequest(
+            url: option.url,
+            headers: _resolvedHeaders,
+            startAt: position > Duration.zero ? position : null,
+            title: ep.title,
+          ),
+        )
         .then((_) {
           if (!mounted) return;
           setState(() => _resolving = false);
@@ -614,7 +741,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           if (!mounted) return;
           setState(() {
             _resolving = false;
-            _failure = PlayerFailure(kind: FailureKind.unknown, detail: e.toString());
+            _failure = PlayerFailure(
+              kind: FailureKind.unknown,
+              detail: e.toString(),
+            );
           });
         });
   }
@@ -713,7 +843,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       _seekBy(Duration(seconds: shift ? -30 : -5));
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.keyL) {
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.keyL) {
       _seekBy(Duration(seconds: shift ? 30 : 5));
       return KeyEventResult.handled;
     }
@@ -760,41 +891,60 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         : (total > Duration.zero && target > total ? total : target);
     _engine?.seek(clamped);
     _position.value = clamped;
-    _showHud(GestureFeedback(
-      HudKind.seek,
-      '${delta.isNegative ? '-' : '+'}${formatDuration(delta.abs())}  ${formatDuration(clamped)}',
-      icon: delta.isNegative ? Icons.fast_rewind : Icons.fast_forward,
-    ));
+    _showHud(
+      GestureFeedback(
+        HudKind.seek,
+        '${delta.isNegative ? '-' : '+'}${formatDuration(delta.abs())}  ${formatDuration(clamped)}',
+        icon: delta.isNegative ? Icons.fast_rewind : Icons.fast_forward,
+      ),
+    );
   }
 
   void _nudgeVolume(double delta) {
-    _volume = (_volume + delta).clamp(0, 100);
-    unawaited(_engine?.setVolume(_volume));
-    _config = _config.copyWith(volume: _volume);
-    unawaited(PlayerPreferences.update(_config));
-    _showHud(GestureFeedback(
-      HudKind.volume,
-      '${_volume.round()}%',
-      icon: _volume == 0 ? Icons.volume_off : Icons.volume_up,
-    ));
+    _setVolume(_volume + delta);
+    if (!_systemVolume) {
+      _config = _config.copyWith(volume: _volume);
+      unawaited(PlayerPreferences.update(_config));
+    }
+    _showHud(
+      GestureFeedback(
+        HudKind.volume,
+        '${_volume.round()}%',
+        icon: _volume == 0 ? Icons.volume_off : Icons.volume_up,
+      ),
+    );
   }
 
   void _nudgeSpeed(double delta) {
     const List<double> steps = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
     final int index = steps.indexWhere((double s) => s >= _speed - 0.001);
-    final int next = (index < 0 ? 2 : index + (delta > 0 ? 1 : -1)).clamp(0, steps.length - 1);
+    final int next = (index < 0 ? 2 : index + (delta > 0 ? 1 : -1)).clamp(
+      0,
+      steps.length - 1,
+    );
     unawaited(_setSpeed(steps[next]));
-    _showHud(GestureFeedback(HudKind.seek, '${steps[next]}x', icon: Icons.speed));
+    _showHud(
+      GestureFeedback(HudKind.seek, '${steps[next]}x', icon: Icons.speed),
+    );
   }
 
   void _toggleMute() {
-    _volume = _volume > 0 ? 0 : 100;
-    unawaited(_engine?.setVolume(_volume));
-    _showHud(GestureFeedback(
-      HudKind.volume,
-      '${_volume.round()}%',
-      icon: _volume == 0 ? Icons.volume_off : Icons.volume_up,
-    ));
+    if (_volume > 0) {
+      _volumeBeforeMute = _volume;
+      _setVolume(0, immediate: true);
+    } else {
+      _setVolume(
+        _volumeBeforeMute > 0 ? _volumeBeforeMute : 100,
+        immediate: true,
+      );
+    }
+    _showHud(
+      GestureFeedback(
+        HudKind.volume,
+        '${_volume.round()}%',
+        icon: _volume == 0 ? Icons.volume_off : Icons.volume_up,
+      ),
+    );
   }
 
   // ---------- 构建 ----------
@@ -814,8 +964,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             if (!_brightnessNative)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: ColoredBox(
-                    color: Colors.black.withValues(alpha: (1 - _brightness) * 0.65),
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: _brightness,
+                    builder:
+                        (BuildContext context, double value, Widget? child) {
+                          return ColoredBox(
+                            color: Colors.black.withValues(
+                              alpha: (1 - value) * 0.65,
+                            ),
+                          );
+                        },
                   ),
                 ),
               ),
@@ -839,12 +997,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ValueListenableBuilder<bool>(
               valueListenable: _buffering,
               builder: (BuildContext context, bool buffering, Widget? child) {
-                if (!buffering || _failure != null) return const SizedBox.shrink();
+                if (!buffering || _failure != null)
+                  return const SizedBox.shrink();
                 return const Center(
                   child: SizedBox(
                     width: 32,
                     height: 32,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white70,
+                    ),
                   ),
                 );
               },
@@ -885,8 +1047,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                         subtitle: _current?.title,
                         onBack: () => context.pop(),
                         qualityLabel: _selectedQuality?.label,
-                        onQuality: _qualities.isEmpty ? null : _showQualitySheet,
-                        onCast: _openCast,
+                        onQuality: _qualities.isEmpty
+                            ? null
+                            : _showQualitySheet,
+                        onCast: AppFeatures.dlna ? _openCast : null,
                         casting: _castingDevice != null,
                         onMenu: (String value) {
                           if (value == 'copy') {
@@ -903,35 +1067,58 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                       bottom: 0,
                       child: ValueListenableBuilder<Duration>(
                         valueListenable: _position,
-                        builder: (BuildContext context, Duration position, Widget? child) {
-                          return ValueListenableBuilder<Duration>(
-                            valueListenable: _duration,
-                            builder: (BuildContext context, Duration duration, Widget? _) {
-                              return ValueListenableBuilder<bool>(
-                                valueListenable: _playing,
-                                builder: (BuildContext context, bool playing, Widget? __) {
-                                  return PlayerBottomBar(
-                                    position: position,
-                                    duration: duration,
-                                    playing: playing,
-                                    speed: _speed,
-                                    onSeek: (Duration target) {
-                                      _engine?.seek(target);
-                                      _position.value = target;
+                        builder:
+                            (
+                              BuildContext context,
+                              Duration position,
+                              Widget? child,
+                            ) {
+                              return ValueListenableBuilder<Duration>(
+                                valueListenable: _duration,
+                                builder:
+                                    (
+                                      BuildContext context,
+                                      Duration duration,
+                                      Widget? _,
+                                    ) {
+                                      return ValueListenableBuilder<bool>(
+                                        valueListenable: _playing,
+                                        builder:
+                                            (
+                                              BuildContext context,
+                                              bool playing,
+                                              Widget? __,
+                                            ) {
+                                              return PlayerBottomBar(
+                                                position: position,
+                                                duration: duration,
+                                                playing: playing,
+                                                speed: _speed,
+                                                onSeek: (Duration target) {
+                                                  _engine?.seek(target);
+                                                  _position.value = target;
+                                                },
+                                                onTogglePlay: () =>
+                                                    unawaited(_togglePlay()),
+                                                onSpeed: (double value) =>
+                                                    unawaited(_setSpeed(value)),
+                                                onEpisodes: _episodes.length > 1
+                                                    ? _showEpisodes
+                                                    : null,
+                                                onNext: _next == null
+                                                    ? null
+                                                    : () => unawaited(
+                                                        _playEpisode(_next!),
+                                                      ),
+                                                onFullscreen: () => unawaited(
+                                                  _toggleImmersive(),
+                                                ),
+                                              );
+                                            },
+                                      );
                                     },
-                                    onTogglePlay: () => unawaited(_togglePlay()),
-                                    onSpeed: (double value) => unawaited(_setSpeed(value)),
-                                    onEpisodes: _episodes.length > 1 ? _showEpisodes : null,
-                                    onNext: _next == null
-                                        ? null
-                                        : () => unawaited(_playEpisode(_next!)),
-                                    onFullscreen: () => unawaited(_toggleImmersive()),
-                                  );
-                                },
                               );
                             },
-                          );
-                        },
                       ),
                     ),
                   ],
@@ -940,9 +1127,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ),
             ValueListenableBuilder<GestureFeedback?>(
               valueListenable: _hud,
-              builder: (BuildContext context, GestureFeedback? feedback, Widget? child) {
-                return PlayerHudOverlay(feedback: feedback);
-              },
+              builder:
+                  (
+                    BuildContext context,
+                    GestureFeedback? feedback,
+                    Widget? child,
+                  ) {
+                    return PlayerHudOverlay(feedback: feedback);
+                  },
             ),
             if (_loading)
               const Center(
@@ -956,7 +1148,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   Widget _debugOverlay(L10n l) {
     final int mb = _config.bufferSize ~/ (1024 * 1024);
-    final String renderer = _usingHardware ? l.renderModeHardware : l.renderModeSoftware;
+    final String renderer = _usingHardware
+        ? l.renderModeHardware
+        : l.renderModeSoftware;
     return Positioned(
       left: 8,
       top: 8,
@@ -1016,7 +1210,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               Text(
                 primary,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.5),
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  height: 1.5,
+                ),
               ),
               if (failure.detail.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 8),
@@ -1032,7 +1230,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   children: <Widget>[
                     SelectableText(
                       failure.detail,
-                      style: const TextStyle(color: Colors.white38, fontSize: 10),
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 10,
+                      ),
                     ),
                   ],
                 ),
@@ -1043,18 +1244,28 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 alignment: WrapAlignment.center,
                 children: <Widget>[
                   if (_resolvedUrl != null)
-                    TextButton(onPressed: () => unawaited(_retry()), child: Text(l.retry)),
-                  TextButton(onPressed: () => unawaited(_reResolve()), child: Text(l.resolveAgain)),
+                    TextButton(
+                      onPressed: () => unawaited(_retry()),
+                      child: Text(l.retry),
+                    ),
+                  TextButton(
+                    onPressed: () => unawaited(_reResolve()),
+                    child: Text(l.resolveAgain),
+                  ),
                   if (renderIssue && _usingHardware)
                     TextButton(
-                      onPressed: () => unawaited(_switchRenderer(RenderPolicy.software)),
+                      onPressed: () =>
+                          unawaited(_switchRenderer(RenderPolicy.software)),
                       child: Text(l.switchToSoftware),
                     ),
                   TextButton(
                     onPressed: () => unawaited(_copyStreamUrl()),
                     child: Text(l.copyStreamUrl),
                   ),
-                  TextButton(onPressed: () => context.pop(), child: Text(l.back)),
+                  TextButton(
+                    onPressed: () => context.pop(),
+                    child: Text(l.back),
+                  ),
                 ],
               ),
             ],
@@ -1096,7 +1307,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   ),
                   child: Text(
                     '${ep.index}',
-                    style: TextStyle(color: active ? Colors.white : Colors.white70),
+                    style: TextStyle(
+                      color: active ? Colors.white : Colors.white70,
+                    ),
                   ),
                 );
               },
@@ -1123,13 +1336,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   children: <Widget>[
                     Text(
                       l.qualityLabel,
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                      ),
                     ),
                   ],
                 ),
               ),
               ListTile(
-                title: Text(l.qualityAuto, style: const TextStyle(color: Colors.white)),
+                title: Text(
+                  l.qualityAuto,
+                  style: const TextStyle(color: Colors.white),
+                ),
                 trailing: _qualityIsAuto
                     ? const Icon(Icons.check, color: Colors.white, size: 18)
                     : null,
@@ -1143,8 +1362,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               ),
               for (final QualityOption option in _qualities)
                 ListTile(
-                  title: Text(option.label, style: const TextStyle(color: Colors.white)),
-                  trailing: !_qualityIsAuto && _selectedQuality?.url == option.url
+                  title: Text(
+                    option.label,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  trailing:
+                      !_qualityIsAuto && _selectedQuality?.url == option.url
                       ? const Icon(Icons.check, color: Colors.white, size: 18)
                       : null,
                   onTap: () {

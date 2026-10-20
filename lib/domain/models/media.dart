@@ -8,6 +8,7 @@ class SearchHit {
     this.cover,
     this.remark,
     this.year,
+    this.category,
   });
 
   final String title;
@@ -19,6 +20,9 @@ class SearchHit {
   final String? cover;
   final String? remark;
   final int? year;
+
+  /// 源站分类名，例如「韩国剧」「欧美剧」；规则源可能为空。
+  final String? category;
 }
 
 /// 单个源的剧集详情。
@@ -84,7 +88,7 @@ class PlayInfo {
   });
 
   const PlayInfo.unsupported(String reason)
-      : this(mode: PlayMode.unsupported, message: reason);
+    : this(mode: PlayMode.unsupported, message: reason);
 
   final PlayMode mode;
   final String? url;

@@ -7,6 +7,7 @@ import '../core/storage/database.dart';
 import '../data/repository/library_repository.dart';
 import '../data/repository/source_repository.dart';
 import '../data/metadata/credits_repository.dart';
+import '../data/metadata/tmdb_classifier.dart';
 import '../data/search_service.dart';
 import '../data/sync/sync_service.dart';
 import 'locale.dart';
@@ -22,16 +23,16 @@ final Provider<HttpClient> httpClientProvider = Provider<HttpClient>(
 
 final Provider<SourceRepository> sourceRepositoryProvider =
     Provider<SourceRepository>((Ref ref) {
-  return SourceRepository(
-    ref.watch(databaseProvider),
-    ref.watch(httpClientProvider),
-  );
-});
+      return SourceRepository(
+        ref.watch(databaseProvider),
+        ref.watch(httpClientProvider),
+      );
+    });
 
 final Provider<LibraryRepository> libraryRepositoryProvider =
     Provider<LibraryRepository>((Ref ref) {
-  return LibraryRepository(ref.watch(databaseProvider));
-});
+      return LibraryRepository(ref.watch(databaseProvider));
+    });
 
 final Provider<SearchService> searchServiceProvider = Provider<SearchService>(
   (Ref ref) => const SearchService(),
@@ -40,14 +41,25 @@ final Provider<SearchService> searchServiceProvider = Provider<SearchService>(
 /// 演职员缓存（TMDB）。
 final Provider<CreditsRepository> creditsRepositoryProvider =
     Provider<CreditsRepository>((Ref ref) {
-  return CreditsRepository(
-    ref.watch(databaseProvider),
-    ref.watch(httpClientProvider),
-  );
-});
+      return CreditsRepository(
+        ref.watch(databaseProvider),
+        ref.watch(httpClientProvider),
+      );
+    });
+
+/// 用 TMDB 判断条目是否属于韩剧（带 SQLite 缓存）。
+final Provider<TmdbClassifier> tmdbClassifierProvider =
+    Provider<TmdbClassifier>(
+      (Ref ref) => TmdbClassifier(
+        ref.watch(databaseProvider),
+        ref.watch(httpClientProvider),
+      ),
+    );
 
 /// 跨设备同步（WebDAV）。
-final Provider<SyncService> syncServiceProvider = Provider<SyncService>((Ref ref) {
+final Provider<SyncService> syncServiceProvider = Provider<SyncService>((
+  Ref ref,
+) {
   final SyncService service = SyncService(
     library: ref.watch(libraryRepositoryProvider),
     sources: ref.watch(sourceRepositoryProvider),

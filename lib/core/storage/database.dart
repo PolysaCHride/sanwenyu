@@ -109,6 +109,22 @@ class AppDatabase {
         fetched_at INTEGER NOT NULL
       );
     ''');
+    // TMDB 剧名匹配缓存：用于「韩剧」分类，负结果也缓存，避免重复请求。
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS tmdb_titles (
+        cache_key TEXT PRIMARY KEY,
+        is_korean INTEGER NOT NULL,
+        tmdb_id INTEGER,
+        name TEXT,
+        original_name TEXT,
+        year INTEGER,
+        origin_country TEXT,
+        original_language TEXT,
+        poster_path TEXT,
+        overview TEXT,
+        checked_at INTEGER NOT NULL
+      );
+    ''');
   }
 
   /// 给老库补列（SQLite 没有 IF NOT EXISTS 的 ADD COLUMN）。
@@ -121,8 +137,10 @@ class AppDatabase {
   }
 
   String? meta(String key) {
-    final List<Row> rows =
-        db.select('SELECT value FROM sync_meta WHERE key = ? LIMIT 1', <Object?>[key]);
+    final List<Row> rows = db.select(
+      'SELECT value FROM sync_meta WHERE key = ? LIMIT 1',
+      <Object?>[key],
+    );
     return rows.isEmpty ? null : rows.first['value'] as String;
   }
 

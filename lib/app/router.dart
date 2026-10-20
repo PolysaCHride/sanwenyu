@@ -20,10 +20,18 @@ import '../features/sources/rule_editor_page.dart';
 import '../features/sources/sources_page.dart';
 import '../features/timeline/timeline_page.dart';
 import '../l10n/l10n.dart';
+import 'feature_flags.dart';
 
 /// 全局路由。
 final GoRouter appRouter = GoRouter(
   initialLocation: '/popular',
+  redirect: (BuildContext context, GoRouterState state) {
+    // WebDAV 未完成时隐藏入口，同时阻止旧链接/深链进入半成品页。
+    if (!AppFeatures.webDavSync && state.uri.path == '/settings/sync') {
+      return '/my';
+    }
+    return null;
+  },
   routes: <RouteBase>[
     ShellRoute(
       builder: (BuildContext context, GoRouterState state, Widget child) {
@@ -32,23 +40,30 @@ final GoRouter appRouter = GoRouter(
       routes: <RouteBase>[
         GoRoute(
           path: '/popular',
-          builder: (BuildContext context, GoRouterState state) => const PopularPage(),
+          builder: (BuildContext context, GoRouterState state) =>
+              const PopularPage(),
         ),
         GoRoute(
           path: '/timeline',
-          builder: (BuildContext context, GoRouterState state) => const TimelinePage(),
+          builder: (BuildContext context, GoRouterState state) =>
+              const TimelinePage(),
         ),
         GoRoute(
           path: '/collect',
-          builder: (BuildContext context, GoRouterState state) => const CollectPage(),
+          builder: (BuildContext context, GoRouterState state) =>
+              const CollectPage(),
         ),
         GoRoute(
           path: '/my',
-          builder: (BuildContext context, GoRouterState state) => const MyPage(),
+          builder: (BuildContext context, GoRouterState state) =>
+              const MyPage(),
         ),
       ],
     ),
-    GoRoute(path: '/search', builder: (BuildContext c, GoRouterState s) => const SearchPage()),
+    GoRoute(
+      path: '/search',
+      builder: (BuildContext c, GoRouterState s) => const SearchPage(),
+    ),
     GoRoute(
       path: '/detail',
       builder: (BuildContext c, GoRouterState s) => DetailPage(
@@ -67,16 +82,27 @@ final GoRouter appRouter = GoRouter(
         title: s.uri.queryParameters['title'],
       ),
     ),
-    GoRoute(path: '/sources', builder: (BuildContext c, GoRouterState s) => const SourcesPage()),
+    GoRoute(
+      path: '/sources',
+      builder: (BuildContext c, GoRouterState s) => const SourcesPage(),
+    ),
     GoRoute(
       path: '/sources/rule',
-      builder: (BuildContext c, GoRouterState s) => RuleEditorPage(
-        sourceId: s.uri.queryParameters['sourceId'],
-      ),
+      builder: (BuildContext c, GoRouterState s) =>
+          RuleEditorPage(sourceId: s.uri.queryParameters['sourceId']),
     ),
-    GoRoute(path: '/settings/theme', builder: (BuildContext c, GoRouterState s) => const ThemeSettingsPage()),
-    GoRoute(path: '/settings/player', builder: (BuildContext c, GoRouterState s) => const PlayerSettingsPage()),
-    GoRoute(path: '/settings/history', builder: (BuildContext c, GoRouterState s) => const HistoryPage()),
+    GoRoute(
+      path: '/settings/theme',
+      builder: (BuildContext c, GoRouterState s) => const ThemeSettingsPage(),
+    ),
+    GoRoute(
+      path: '/settings/player',
+      builder: (BuildContext c, GoRouterState s) => const PlayerSettingsPage(),
+    ),
+    GoRoute(
+      path: '/settings/history',
+      builder: (BuildContext c, GoRouterState s) => const HistoryPage(),
+    ),
     GoRoute(
       path: '/settings/sync',
       builder: (BuildContext c, GoRouterState s) => const SyncSettingsPage(),
@@ -85,12 +111,19 @@ final GoRouter appRouter = GoRouter(
       path: '/settings/metadata',
       builder: (BuildContext c, GoRouterState s) => const TmdbSettingsPage(),
     ),
-    GoRoute(path: '/settings/logs', builder: (BuildContext c, GoRouterState s) => const LogsPage()),
+    GoRoute(
+      path: '/settings/logs',
+      builder: (BuildContext c, GoRouterState s) => const LogsPage(),
+    ),
     GoRoute(
       path: '/settings/language',
-      builder: (BuildContext c, GoRouterState s) => const LanguageSettingsPage(),
+      builder: (BuildContext c, GoRouterState s) =>
+          const LanguageSettingsPage(),
     ),
-    GoRoute(path: '/settings/about', builder: (BuildContext c, GoRouterState s) => const AboutPage()),
+    GoRoute(
+      path: '/settings/about',
+      builder: (BuildContext c, GoRouterState s) => const AboutPage(),
+    ),
   ],
 );
 
@@ -111,10 +144,17 @@ class _AppShellState extends State<AppShell> {
   String get location => widget.location;
   Widget get child => widget.child;
 
-  static const List<String> _tabs = <String>['/popular', '/timeline', '/collect', '/my'];
+  static const List<String> _tabs = <String>[
+    '/popular',
+    '/timeline',
+    '/collect',
+    '/my',
+  ];
 
   int get _index {
-    final i = _tabs.indexWhere((String t) => location == t || location.startsWith('$t/'));
+    final i = _tabs.indexWhere(
+      (String t) => location == t || location.startsWith('$t/'),
+    );
     return i < 0 ? 0 : i;
   }
 
@@ -137,7 +177,8 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final L10n l = L10n.of(context);
-    final bool portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
+    final bool portrait =
+        MediaQuery.orientationOf(context) == Orientation.portrait;
 
     final List<NavigationDestination> destinations = <NavigationDestination>[
       NavigationDestination(
@@ -164,27 +205,27 @@ class _AppShellState extends State<AppShell> {
 
     final List<NavigationRailDestination> railDestinations =
         <NavigationRailDestination>[
-      NavigationRailDestination(
-        icon: const Icon(Icons.explore_outlined),
-        selectedIcon: const Icon(Icons.explore),
-        label: Text(l.tabDiscover),
-      ),
-      NavigationRailDestination(
-        icon: const Icon(Icons.calendar_month_outlined),
-        selectedIcon: const Icon(Icons.calendar_month),
-        label: Text(l.tabTimeline),
-      ),
-      NavigationRailDestination(
-        icon: const Icon(Icons.video_library_outlined),
-        selectedIcon: const Icon(Icons.video_library),
-        label: Text(l.tabCollect),
-      ),
-      NavigationRailDestination(
-        icon: const Icon(Icons.person_outline),
-        selectedIcon: const Icon(Icons.person),
-        label: Text(l.tabMy),
-      ),
-    ];
+          NavigationRailDestination(
+            icon: const Icon(Icons.explore_outlined),
+            selectedIcon: const Icon(Icons.explore),
+            label: Text(l.tabDiscover),
+          ),
+          NavigationRailDestination(
+            icon: const Icon(Icons.calendar_month_outlined),
+            selectedIcon: const Icon(Icons.calendar_month),
+            label: Text(l.tabTimeline),
+          ),
+          NavigationRailDestination(
+            icon: const Icon(Icons.video_library_outlined),
+            selectedIcon: const Icon(Icons.video_library),
+            label: Text(l.tabCollect),
+          ),
+          NavigationRailDestination(
+            icon: const Icon(Icons.person_outline),
+            selectedIcon: const Icon(Icons.person),
+            label: Text(l.tabMy),
+          ),
+        ];
 
     final Widget shell = portrait
         ? Scaffold(

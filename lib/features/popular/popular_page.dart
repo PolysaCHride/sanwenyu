@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../app/style.dart';
+import '../../data/metadata/tmdb_classifier.dart';
+import '../../data/metadata/tmdb_settings.dart';
 import '../../data/repository/source_repository.dart';
 import '../../domain/models/media.dart';
 import '../../domain/source/source_adapter.dart';
@@ -29,6 +31,10 @@ class _PopularPageState extends ConsumerState<PopularPage> {
   bool _loading = true;
   bool _loadingMore = false;
   bool _hasMore = true;
+  bool _koreanOnly = false;
+  bool _classifying = false;
+  bool _noKeyNotified = false;
+  final Set<String> _koreanCategoryIds = <String>{};
   String? _error;
   SourceAdapter? _adapter;
 
@@ -50,11 +56,18 @@ class _PopularPageState extends ConsumerState<PopularPage> {
     if (!_scroll.hasClients) return;
     if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 200 &&
         !_loadingMore &&
-        _hasMore &&
         !_loading &&
+        !_classifying &&
+        _hasMore &&
         _error == null) {
       _loadMore();
     }
+  }
+
+  static bool _isKoreanName(String name) {
+    return name.contains('韩剧') ||
+        name.contains('韩国剧') ||
+        name.contains('韩国电视剧');
   }
 
   SourceAdapter? _pickAdapter(List<SourceAdapter> adapters) {
@@ -80,14 +93,34 @@ class _PopularPageState extends ConsumerState<PopularPage> {
       return;
     }
     final L10n l = L10n.of(context);
+    final List<Category> rawCategories = await adapter.loadCategories();
+    final List<Category> categories = rawCategories.isEmpty
+        ? <Category>[Category(id: '', name: l.latestUpdates)]
+        : rawCategories;
+    final Set<String> koreanIds = <String>{
+      for (final Category c in categories)
+        if (_isKoreanName(c.name)) c.id,
+    };
+    final String firstKorean = koreanIds.isEmpty ? '' : koreanIds.first;
+    final List<Category> localized = categories
+        .map(
+          (Category c) => Category(
+            id: c.id,
+            name: _isKoreanName(c.name)
+                ? l.koreanDramas
+                : l.categoryName(c.id, c.name),
+          ),
+        )
+        .toList();
+    if (!mounted) return;
     setState(() {
       _adapter = adapter;
-      _categories = adapter.categories.isEmpty
-          ? <Category>[Category(id: '', name: l.latestUpdates)]
-          : adapter.categories
-              .map((Category c) => Category(id: c.id, name: l.categoryName(c.id, c.name)))
-              .toList();
-      _category = _categories.first.id;
+      _categories = localized;
+      _koreanCategoryIds
+        ..clear()
+        ..addAll(koreanIds);
+      _category = firstKorean.isNotEmpty ? firstKorean : localized.first.id;
+      _koreanOnly = firstKorean.isNotEmpty;
     });
     await _reload();
   }
@@ -109,6 +142,9 @@ class _PopularPageState extends ConsumerState<PopularPage> {
         _loading = false;
         _hasMore = list.isNotEmpty;
       });
+      if (_koreanOnly) {
+        await _applyKorean(list, replace: true);
+      }
     } on Object catch (e) {
       if (!mounted) return;
       setState(() {
@@ -127,10 +163,13 @@ class _PopularPageState extends ConsumerState<PopularPage> {
       if (!mounted) return;
       setState(() {
         _page += 1;
-        _items = <SearchHit>[..._items, ...list];
-        _loadingMore = false;
         _hasMore = list.isNotEmpty;
+        if (!_koreanOnly) _items = <SearchHit>[..._items, ...list];
+        _loadingMore = false;
       });
+      if (_koreanOnly) {
+        await _applyKorean(list, replace: false);
+      }
     } on Object {
       if (!mounted) return;
       setState(() {
@@ -140,9 +179,73 @@ class _PopularPageState extends ConsumerState<PopularPage> {
     }
   }
 
+  Future<void> _applyKorean(
+    List<SearchHit> raw, {
+    required bool replace,
+  }) async {
+    if (raw.isEmpty) return;
+    final TmdbSettings settings = await TmdbSettings.load();
+    if (!settings.enabled) {
+      if (!mounted) return;
+      setState(() {
+        _koreanOnly = false;
+        _classifying = false;
+        if (!replace) _items = <SearchHit>[..._items, ...raw];
+      });
+      _notifyNoKey();
+      return;
+    }
+
+    setState(() => _classifying = true);
+    final List<ClassifiedHit> classified = await ref
+        .read(tmdbClassifierProvider)
+        .classify(raw);
+    if (!mounted) return;
+
+    final bool anyKnown = classified.any((ClassifiedHit c) => c.known);
+    final List<SearchHit> filtered = anyKnown
+        ? classified
+              .where((ClassifiedHit c) => c.isKorean)
+              .map((ClassifiedHit c) => c.hit)
+              .toList()
+        : raw;
+    setState(() {
+      _classifying = false;
+      if (replace) {
+        _items = filtered;
+      } else {
+        _items = <SearchHit>[..._items, ...filtered];
+      }
+    });
+    if (!anyKnown) {
+      _snack(L10n.of(context).tmdbClassifyFailed);
+    }
+  }
+
+  void _notifyNoKey() {
+    if (_noKeyNotified || !mounted) return;
+    _noKeyNotified = true;
+    _snack(L10n.of(context).tmdbNoKey);
+  }
+
+  void _toggleKorean() {
+    setState(() => _koreanOnly = !_koreanOnly);
+    _reload();
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   void _selectCategory(String id) {
     if (id == _category) return;
-    setState(() => _category = id);
+    setState(() {
+      _category = id;
+      _koreanOnly = _koreanCategoryIds.contains(id);
+    });
     if (_scroll.hasClients) _scroll.jumpTo(0);
     _reload();
   }
@@ -157,7 +260,28 @@ class _PopularPageState extends ConsumerState<PopularPage> {
           slivers: <Widget>[
             _appBar(context),
             if (_loadingMore)
-              const SliverToBoxAdapter(child: LinearProgressIndicator(minHeight: 3)),
+              const SliverToBoxAdapter(
+                child: LinearProgressIndicator(minHeight: 3),
+              ),
+            if (_classifying)
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const LinearProgressIndicator(minHeight: 2),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+                      child: Text(
+                        L10n.of(context).tmdbClassifying,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ..._body(context),
           ],
         ),
@@ -165,8 +289,11 @@ class _PopularPageState extends ConsumerState<PopularPage> {
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           if (_scroll.hasClients) {
-            _scroll.animateTo(0,
-                duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
+            _scroll.animateTo(
+              0,
+              duration: const Duration(milliseconds: 350),
+              curve: Curves.easeOut,
+            );
           }
         },
         child: const Icon(Icons.arrow_upward),
@@ -189,6 +316,14 @@ class _PopularPageState extends ConsumerState<PopularPage> {
       surfaceTintColor: Colors.transparent,
       actions: <Widget>[
         IconButton(
+          tooltip: l.koreanOnly,
+          onPressed: _toggleKorean,
+          icon: Icon(
+            _koreanOnly ? Icons.filter_alt : Icons.filter_alt_off,
+            color: _koreanOnly ? theme.colorScheme.primary : null,
+          ),
+        ),
+        IconButton(
           tooltip: l.search,
           onPressed: () => context.push('/search'),
           icon: const Icon(Icons.search),
@@ -204,17 +339,25 @@ class _PopularPageState extends ConsumerState<PopularPage> {
         child: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             const double maxExtent = 120;
-            final double t = (1 -
-                    ((constraints.maxHeight - kToolbarHeight) /
-                            (maxExtent - kToolbarHeight))
-                        .clamp(0.0, 1.0))
-                .toDouble();
+            final double t =
+                (1 -
+                        ((constraints.maxHeight - kToolbarHeight) /
+                                (maxExtent - kToolbarHeight))
+                            .clamp(0.0, 1.0))
+                    .toDouble();
             final double fontSize = 28 + (20 - 28) * t;
-            final FontWeight weight = t < 0.5 ? FontWeight.w700 : FontWeight.w500;
+            final FontWeight weight = t < 0.5
+                ? FontWeight.w700
+                : FontWeight.w500;
             return Align(
               alignment: Alignment.centerLeft,
               child: Padding(
-                padding: const EdgeInsets.only(left: 16, top: 8, bottom: 8, right: 60),
+                padding: const EdgeInsets.only(
+                  left: 16,
+                  top: 8,
+                  bottom: 8,
+                  right: 60,
+                ),
                 child: SizedBox(
                   height: 44,
                   child: PopupMenuButton<String>(
@@ -232,18 +375,23 @@ class _PopularPageState extends ConsumerState<PopularPage> {
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         Text(
-                          categories.firstWhere(
-                            (Category c) => c.id == _category,
-                            orElse: () => categories.first,
-                          ).name,
+                          categories
+                              .firstWhere(
+                                (Category c) => c.id == _category,
+                                orElse: () => categories.first,
+                              )
+                              .name,
                           style: theme.textTheme.headlineMedium?.copyWith(
                             fontWeight: weight,
                             fontSize: fontSize,
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.keyboard_arrow_down,
-                            size: fontSize, color: theme.iconTheme.color),
+                        Icon(
+                          Icons.keyboard_arrow_down,
+                          size: fontSize,
+                          color: theme.iconTheme.color,
+                        ),
                       ],
                     ),
                   ),
@@ -259,8 +407,11 @@ class _PopularPageState extends ConsumerState<PopularPage> {
   List<Widget> _body(BuildContext context) {
     final L10n l = L10n.of(context);
     if (_loading) {
-      return const <Widget>[
-        SliverFillRemaining(child: LoadingView()),
+      return const <Widget>[SliverFillRemaining(child: LoadingView())];
+    }
+    if (_classifying && _items.isEmpty) {
+      return <Widget>[
+        SliverFillRemaining(child: LoadingView(message: l.tmdbClassifying)),
       ];
     }
     if (_error != null) {
@@ -276,8 +427,12 @@ class _PopularPageState extends ConsumerState<PopularPage> {
         SliverFillRemaining(
           child: EmptyView(
             icon: noBrowser ? Icons.travel_explore : Icons.live_tv_outlined,
-            title: noBrowser ? l.noBrowseTitle : l.noContentTitle,
-            description: noBrowser ? l.noBrowseDesc : l.noContentDesc,
+            title: noBrowser
+                ? l.noBrowseTitle
+                : (_koreanOnly ? l.tmdbNoKorean : l.noContentTitle),
+            description: noBrowser
+                ? l.noBrowseDesc
+                : (_koreanOnly ? l.tmdbNoKoreanDesc : l.noContentDesc),
             action: Wrap(
               spacing: 8,
               children: <Widget>[
@@ -310,26 +465,22 @@ class _PopularPageState extends ConsumerState<PopularPage> {
               columns,
             ),
           ),
-          delegate: SliverChildBuilderDelegate(
-            (BuildContext context, int i) {
-              final item = _items[i];
-              return CatalogCard(
-                title: item.title,
-                cover: item.cover,
-                badge: item.remark,
-                onTap: () => context.push(
-                  '/detail?sourceId=${Uri.encodeComponent(item.sourceId)}'
-                  '&key=${Uri.encodeComponent(item.sourceKey)}'
-                  '&title=${Uri.encodeComponent(item.title)}',
-                ),
-              );
-            },
-            childCount: _items.length,
-          ),
+          delegate: SliverChildBuilderDelegate((BuildContext context, int i) {
+            final item = _items[i];
+            return CatalogCard(
+              title: item.title,
+              cover: item.cover,
+              badge: item.remark,
+              onTap: () => context.push(
+                '/detail?sourceId=${Uri.encodeComponent(item.sourceId)}'
+                '&key=${Uri.encodeComponent(item.sourceKey)}'
+                '&title=${Uri.encodeComponent(item.title)}',
+              ),
+            );
+          }, childCount: _items.length),
         ),
       ),
       const SliverToBoxAdapter(child: SizedBox(height: 80)),
     ];
   }
 }
-
