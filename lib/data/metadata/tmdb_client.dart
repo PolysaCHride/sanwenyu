@@ -23,12 +23,14 @@ class TmdbClient {
     required this.apiKey,
     required this.language,
     required HttpClient http,
+    this.baseUrl = _defaultBase,
   }) : _http = http;
 
-  static const String _base = 'https://api.themoviedb.org/3';
+  static const String _defaultBase = 'https://api.themoviedb.org/3';
 
   final String apiKey;
   final String language;
+  final String baseUrl;
   final HttpClient _http;
 
   /// 搜索剧集并取演职员；匹配不到返回 [SeriesCredits.empty]（tmdbId 为 null）。
@@ -45,7 +47,7 @@ class TmdbClient {
     final int id = match.id;
 
     final Response<dynamic> resp = await _http.getJson(
-      '$_base/tv/$id/credits',
+      '$baseUrl/tv/$id/credits',
       query: <String, dynamic>{'api_key': apiKey, 'language': language},
     );
     _ensureOk(resp);
@@ -99,7 +101,7 @@ class TmdbClient {
     final Map<int, TmdbTitleMatch> candidates = <int, TmdbTitleMatch>{};
     for (final String query in queries) {
       final Response<dynamic> resp = await _http.getJson(
-        '$_base/search/tv',
+        '$baseUrl/search/tv',
         query: <String, dynamic>{
           'api_key': apiKey,
           'language': language,
@@ -136,7 +138,7 @@ class TmdbClient {
   /// 设置页的连接测试：只验证 Key 是否可用。
   Future<void> testConnection() async {
     final Response<dynamic> resp = await _http.getJson(
-      '$_base/configuration',
+      '$baseUrl/configuration',
       query: <String, dynamic>{'api_key': apiKey},
     );
     _ensureOk(resp);
