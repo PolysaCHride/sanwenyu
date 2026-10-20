@@ -34,7 +34,6 @@ class _PopularPageState extends ConsumerState<PopularPage> {
   bool _koreanOnly = false;
   bool _classifying = false;
   bool _noKeyNotified = false;
-  final Set<String> _koreanCategoryIds = <String>{};
   String? _error;
   SourceAdapter? _adapter;
 
@@ -116,11 +115,9 @@ class _PopularPageState extends ConsumerState<PopularPage> {
     setState(() {
       _adapter = adapter;
       _categories = localized;
-      _koreanCategoryIds
-        ..clear()
-        ..addAll(koreanIds);
       _category = firstKorean.isNotEmpty ? firstKorean : localized.first.id;
-      _koreanOnly = firstKorean.isNotEmpty;
+      // 源站已有「韩剧」分类时直接使用该分类；TMDB 只作为手动筛选增强。
+      _koreanOnly = false;
     });
     await _reload();
   }
@@ -246,7 +243,8 @@ class _PopularPageState extends ConsumerState<PopularPage> {
     if (id == _category) return;
     setState(() {
       _category = id;
-      _koreanOnly = _koreanCategoryIds.contains(id);
+      // 分类本身已经保证内容类型，切换分类时不自动开启 TMDB 筛选。
+      _koreanOnly = false;
     });
     if (_scroll.hasClients) _scroll.jumpTo(0);
     _reload();

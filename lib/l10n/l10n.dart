@@ -347,8 +347,8 @@ class L10n {
   );
   String get tmdbLanguage => _v('数据语言', 'Data language');
   String get tmdbNote => _v(
-    '自定义 Key 只保存在本机；未配置时详情页不显示演职员，也不启用 TMDB 韩剧识别，不影响其他功能。',
-    'A custom key stays on this device. Without one, cast data and TMDB Korean-drama detection are disabled; nothing else changes.',
+    '源站有「韩剧」分类时优先使用源站分类；TMDB 用于「只看韩剧」筛选和演职员，是可选的增强。自定义 Key 只保存在本机。',
+    'When the source has a Korean-drama category it is used first. TMDB powers the optional Korean-only filter and cast data. A custom key stays on this device.',
   );
   String get tmdbTestOk => _v('连接成功', 'Connected');
   String get tmdbTestFailed => _v('连接失败', 'Connection failed');
