@@ -25,7 +25,7 @@ class SanwenyuApp extends ConsumerWidget {
 
     return _SyncBootstrap(
       child: MaterialApp.router(
-        title: locale.languageCode == 'en' ? 'K-Drama' : '韩剧',
+        title: 'sanwenyu',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),

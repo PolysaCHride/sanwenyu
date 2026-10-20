@@ -23,7 +23,7 @@ class L10n {
       isZh ? '$count$zhUnit' : '$count $enUnit${count == 1 ? '' : 's'}';
 
   // ---------- 通用 ----------
-  String get appName => _v('韩剧', 'K-Drama');
+  String get appName => 'sanwenyu';
   String get ok => _v('确定', 'OK');
   String get cancel => _v('取消', 'Cancel');
   String get save => _v('保存', 'Save');

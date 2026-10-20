@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "SanWenYu Contributors" "\0"
-            VALUE "FileDescription", "K-Drama Player" "\0"
+            VALUE "CompanyName", "sanwenyu" "\0"
+            VALUE "FileDescription", "sanwenyu" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "sanwenyu" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 SanWenYu Contributors. GPL-3.0." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 sanwenyu. GPL-3.0." "\0"
             VALUE "OriginalFilename", "sanwenyu.exe" "\0"
-            VALUE "ProductName", "K-Drama Player" "\0"
+            VALUE "ProductName", "sanwenyu" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
